@@ -3,17 +3,13 @@ import os
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Dict, List
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 
 app = FastAPI(title="Company RAG Chatbot API (Gemini)")
 
-# تفعيل الـ CORS للسماح للموقع الأمامي بالاتصال بالـ API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,19 +18,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# التحقق من وجود مفتاح الـ API قبل تهيئة النماذج لتفادي انهيار الحاوية
-if not os.environ.get("GOOGLE_API_KEY"):
-    # سيظهر هذا التنبيه في سجلات Vercel إذا نسيت إضافة المفتاح في الـ Settings
-    print("Warning: GOOGLE_API_KEY environment variable is missing!")
-
-# إعداد نماذج الذكاء الاصطناعي لـ Gemini
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
-
-# استخدام الذاكرة العشوائية لتخزين النصوص المؤقتة لملف الشركة
-vectorstore = InMemoryVectorStore(embeddings)
+# متغيرات عامة مبدئية بدون تهيئة ثقيلة في جذر الملف
+vectorstore = None
 is_document_uploaded = False
-
 chat_histories: Dict[str, List] = {}
 
 system_prompt = (
@@ -58,7 +44,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"status": "FastAPI Full-Stack Cloud RAG is active and running!"}
+    return {"status": "FastAPI Cloud RAG is active and running!"}
 
 @app.post("/upload-document/")
 async def upload_document(file: UploadFile = File(...)):
@@ -66,13 +52,16 @@ async def upload_document(file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
     
-    # استخدام المجلد المؤقت القياسي في بيئات Serverless
     temp_file_path = f"/tmp/temp_{file.filename}"
     with open(temp_file_path, "wb") as f:
         f.write(await file.read())
         
     try:
-        # استخدام معالج pypdf البرمجي المتوافق مع البيئات السحابية المقيدة
+        # استدعاء الحزم الثقيلة هنا فقط لتجنب استهلاك الذاكرة عند بدء السيرفر
+        from langchain_community.document_loaders import PyPDFLoader
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        from langchain_core.vectorstores import InMemoryVectorStore
+        
         loader = PyPDFLoader(temp_file_path)
         docs = loader.load()
         
@@ -82,25 +71,31 @@ async def upload_document(file: UploadFile = File(...)):
         if not splits:
             raise ValueError("الملف المرفوع فارغ أو لا يحتوي على نصوص مقروءة.")
             
-        # إضافة المستندات للمستودع في الذاكرة
+        # تهيئة المتجهات محلياً عند الرفع فقط
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        vectorstore = InMemoryVectorStore(embeddings)
         vectorstore.add_documents(splits)
         is_document_uploaded = True
         
-        return {"message": f"تمت معالجة ملف الشركة '{file.filename}' وحفظه في ذاكرة النظام بنجاح!"}
+        return {"message": f"تمت معالجة ملف الشركة '{file.filename}' بنجاح!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة المستند: {str(e)}")
     finally:
-        # التأكد دائماً من مسح الملف المؤقت لتوفير مساحة الذاكرة في الدالة
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
 @app.post("/chat/")
 async def chat_with_customer(request: ChatRequest):
     global vectorstore, is_document_uploaded
-    if not is_document_uploaded:
+    if not is_document_uploaded or vectorstore is None:
         raise HTTPException(status_code=400, detail="برجاء رفع ملف الـ PDF الخاص بالشركة أولاً لتدريب الروبوت.")
     
     try:
+        # استدعاء نماذج المحادثة هنا بدلاً من بيئة التشغيل الأساسية لتقليل الحجم
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
+        
         if request.session_id not in chat_histories:
             chat_histories[request.session_id] = []
         
@@ -120,7 +115,6 @@ async def chat_with_customer(request: ChatRequest):
         history.append(HumanMessage(content=request.question))
         history.append(AIMessage(content=response))
         
-        # الحفاظ على آخر 10 رسائل فقط لعدم تخطي حدود الذاكرة وحجم المدخلات
         if len(history) > 10: 
             chat_histories[request.session_id] = history[-10:]
             
@@ -128,4 +122,3 @@ async def chat_with_customer(request: ChatRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة الرد الذكي: {str(e)}")
-        # /////
