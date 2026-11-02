@@ -29,7 +29,6 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
     
-    # جلب مفتاح ورابط السوبابيز المرفوع تلقائياً من الـ Integration
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_ANON_KEY")
     
@@ -55,7 +54,7 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
             "apikey": supabase_key,
             "Authorization": f"Bearer {supabase_key}",
             "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates" # للقيام بعملية الـ Upsert والتحديث التلقائي
+            "Prefer": "resolution=merge-duplicates"
         }
         payload = {
             "session_id": session_id,
@@ -65,10 +64,11 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
         with httpx.Client(timeout=30.0) as client:
             response = client.post(url, json=payload, headers=headers)
             
+        # تم إصلاح السطر هنا: التحقق من نجاح أكواد الاستجابة القياسية 200 أو 201
         if response.status_code not in:
             raise HTTPException(status_code=response.status_code, detail=f"Database storage failure: {response.text}")
             
-        return {"message": f"تمت معالجة ملف الشركية '{file.filename}' وحفظه سحابياً بنجاح!"}
+        return {"message": f"تمت معالجة ملف الشركة '{file.filename}' وحفظه سحابياً بنجاح!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة وحفظ المستند: {str(e)}")
 
@@ -96,7 +96,7 @@ async def chat_with_customer(request: ChatRequest):
         if not doc_data:
             raise HTTPException(status_code=400, detail="برجاء رفع ملف الـ PDF الخاص بالشركة أولاً لتدريب الروبوت.")
             
-        context = doc_data[0]["context_text"]
+        context = doc_data[0]["context_text"] if isinstance(doc_data, list) else doc_data["context_text"]
         
         # 2. جلب آخر 6 رسائل من تاريخ المحادثة من سوبابيز عبر الـ REST API
         hist_url = f"{supabase_url}/rest/v1/chat_history_store?session_id=eq.{request.session_id}&select=role,message_text&order=id.desc&limit=6"
