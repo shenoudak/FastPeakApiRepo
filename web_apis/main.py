@@ -1,13 +1,12 @@
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import httpx
+import pypdf
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Dict, List
-import pypdf
-from google import genai
-from google.genai import types
 
-app = FastAPI(title="Company Gemini RAG Chatbot API")
+app = FastAPI(title="Company Gemini REST RAG Chatbot API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,22 +16,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# متغيرات لتخزين سياق المستند المستخرج في الذاكرة
 extracted_context = ""
 is_document_uploaded = False
-
-# قاموس لحفظ تاريخ المحادثات لكل جلسة (Session)
 chat_histories: Dict[str, List[Dict[str, str]]] = {}
-
-# دالة مساعدة لتهيئة عميل جوجل عند الحاجة فقط والتحقق من المفتاح
-def get_gemini_client():
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500, 
-            detail="خطأ في السيرفر: لم يتم العثور على GOOGLE_API_KEY في إعدادات البيئة."
-        )
-    return genai.Client(api_key=api_key)
 
 class ChatRequest(BaseModel):
     question: str
@@ -40,7 +26,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"status": "FastAPI Light Gemini RAG is active and running perfectly!"}
+    return {"status": "FastAPI Ultra-Light REST RAG is active and running perfectly!"}
 
 @app.post("/upload-document/")
 async def upload_document(file: UploadFile = File(...)):
@@ -49,7 +35,6 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
     
     try:
-        # قراءة نصوص الـ PDF مباشرة من الذاكرة باستخدام pypdf الخفيفة
         pdf_reader = pypdf.PdfReader(file.file)
         text_chunks = []
         for page in pdf_reader.pages:
@@ -73,16 +58,16 @@ async def chat_with_customer(request: ChatRequest):
     if not is_document_uploaded:
         raise HTTPException(status_code=400, detail="برجاء رفع ملف الـ PDF الخاص بالشركة أولاً لتدريب الروبوت.")
     
-    try:
-        client = get_gemini_client()
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="لم يتم العثور على مفتاح الـ GOOGLE_API_KEY في السيرفر.")
         
-        # إدارة تاريخ المحادثة للجلسة الحالية
+    try:
         if request.session_id not in chat_histories:
             chat_histories[request.session_id] = []
             
         history = chat_histories[request.session_id]
         
-        # بناء نص التوجيه والنظام المدمج مع السياق
         system_instruction = (
             "أنت موظف خدمة عملاء ذكي ومحترف لشركتنا. أجب على سؤال العميل بناءً على السياق المرفق وتاريخ المحادثة فقط.\n"
             "التزم بالقواعد التالية:\n"
@@ -92,36 +77,49 @@ async def chat_with_customer(request: ChatRequest):
             f"السياق المستخرج من ملفات الشركة:\n{extracted_context}"
         )
         
-        # تجهيز الرسائل مع التاريخ لإرسالها لـ Gemini
+        # بناء المحتوى لـ Gemini REST API متوافق مع نموذج gemini-2.5-flash
         contents = []
-        # إضافة آخر 6 رسائل من التاريخ للحفاظ على حجم الذاكرة في الـ Serverless
         for msg in history[-6:]:
-            contents.append(types.Content(
-                role=msg["role"],
-                parts=[types.Part.from_text(text=msg["text"])]
-            ))
+            contents.append({
+                "role": "user" if msg["role"] == "user" else "model",
+                "parts": [{"text": msg["text"]}]
+            })
             
-        # إضافة السؤال الحالي للعميل
-        contents.append(types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=request.question)]
-        ))
+        contents.append({
+            "role": "user",
+            "parts": [{"text": request.question}]
+        })
         
-        # استدعاء نموذج جيميناي الخفيف والمحدث لعام 2026
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.2
+        # الرابط المباشر لواجهة جوجل الرسمية المستقرة
+        url = f"https://googleapis.com{api_key}"
+        
+        payload = {
+            "contents": contents,
+            "systemInstruction": {
+                "parts": [{"text": system_instruction}]
+            },
+            "generationConfig": {
+                "temperature": 0.2
+            }
+        }
+        
+        # إرسال الطلب عبر اتصال HTTP قياسي خفيف جداً
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(url, json=payload)
+            response_json = response.json()
+            
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code, 
+                detail=f"Google API Error: {response_json.get('error', {}).get('message', 'Unknown Error')}"
             )
-        )
+            
+        response_text = response_json['candidates'][0]['content']['parts'][0]['text']
         
-        # حفظ الحوار الحالي في التاريخ
         history.append({"role": "user", "text": request.question})
-        history.append({"role": "model", "text": response.text})
+        history.append({"role": "model", "text": response_text})
         
-        return {"response": response.text}
+        return {"response": response_text}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة الرد الذكي: {str(e)}")
