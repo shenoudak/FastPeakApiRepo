@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 app = FastAPI(title="Company RAG Chatbot API (Gemini)")
 
+# تفعيل الـ CORS للسماح للموقع الأمامي بالاتصال بالـ API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,11 +22,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# إعداد النماذج
+# التحقق من وجود مفتاح الـ API قبل تهيئة النماذج لتفادي انهيار الحاوية
+if not os.environ.get("GOOGLE_API_KEY"):
+    # سيظهر هذا التنبيه في سجلات Vercel إذا نسيت إضافة المفتاح في الـ Settings
+    print("Warning: GOOGLE_API_KEY environment variable is missing!")
+
+# إعداد نماذج الذكاء الاصطناعي لـ Gemini
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
 
-# إنشاء مستودع المتجهات في الذاكرة العشوائية لتجنب أخطاء حزم النظام
+# استخدام الذاكرة العشوائية لتخزين النصوص المؤقتة لملف الشركة
 vectorstore = InMemoryVectorStore(embeddings)
 is_document_uploaded = False
 
@@ -60,24 +66,31 @@ async def upload_document(file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
     
+    # استخدام المجلد المؤقت القياسي في بيئات Serverless
     temp_file_path = f"/tmp/temp_{file.filename}"
     with open(temp_file_path, "wb") as f:
         f.write(await file.read())
         
     try:
+        # استخدام معالج pypdf البرمجي المتوافق مع البيئات السحابية المقيدة
         loader = PyPDFLoader(temp_file_path)
         docs = loader.load()
+        
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=120)
         splits = text_splitter.split_documents(docs)
         
+        if not splits:
+            raise ValueError("الملف المرفوع فارغ أو لا يحتوي على نصوص مقروءة.")
+            
         # إضافة المستندات للمستودع في الذاكرة
         vectorstore.add_documents(splits)
         is_document_uploaded = True
         
-        return {"message": f"تمت معالجة ملف الشركية '{file.filename}' وحفظه في ذاكرة النظام بنجاح!"}
+        return {"message": f"تمت معالجة ملف الشركة '{file.filename}' وحفظه في ذاكرة النظام بنجاح!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة المستند: {str(e)}")
     finally:
+        # التأكد دائماً من مسح الملف المؤقت لتوفير مساحة الذاكرة في الدالة
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
@@ -106,6 +119,8 @@ async def chat_with_customer(request: ChatRequest):
         
         history.append(HumanMessage(content=request.question))
         history.append(AIMessage(content=response))
+        
+        # الحفاظ على آخر 10 رسائل فقط لعدم تخطي حدود الذاكرة وحجم المدخلات
         if len(history) > 10: 
             chat_histories[request.session_id] = history[-10:]
             
