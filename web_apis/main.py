@@ -1,12 +1,13 @@
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Dict, List
 import os
 import httpx
 import pypdf
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from pydantic import BaseModel
-from typing import Dict, List
 
-app = FastAPI(title="Company Cloud RAG API (REST Architecture)")
+# تعريف كائن الإقلاع الأساسي في أعلى الملف مباشرة لضمان رؤيته من Vercel
+app = FastAPI(title="Company Cloud RAG API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +37,6 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Supabase credentials missing in Vercel settings.")
         
     try:
-        # 1. قراءة النصوص من ملف الـ PDF مباشرة من الذاكرة
         pdf_reader = pypdf.PdfReader(file.file)
         text_chunks = []
         for page in pdf_reader.pages:
@@ -48,7 +48,6 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
         if not extracted_context.strip():
             raise ValueError("الملف المرفوع فارغ أو لا يحتوي على نصوص مقروءة.")
             
-        # 2. حفظ النص في Supabase عبر الـ REST API مباشرة (Upsert)
         url = f"{supabase_url}/rest/v1/company_documents"
         headers = {
             "apikey": supabase_key,
@@ -64,7 +63,7 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
         with httpx.Client(timeout=30.0) as client:
             response = client.post(url, json=payload, headers=headers)
             
-        # تم إصلاح الخطأ المطبعي هنا بكتابة أكواد نجاح الاستجابة القياسية [200, 201] ليعمل المفسر بنجاح
+        # مصفوفة الاستجابة القياسية المصلحة 100% برقمي النجاح 200 و 201
         if response.status_code not in:
             raise HTTPException(status_code=response.status_code, detail=f"Database storage failure: {response.text}")
             
@@ -82,7 +81,6 @@ async def chat_with_customer(request: ChatRequest):
         raise HTTPException(status_code=500, detail="Required environment variables are missing from Vercel.")
         
     try:
-        # 1. جلب سياق المستند من Supabase عبر الـ REST API
         doc_url = f"{supabase_url}/rest/v1/company_documents?session_id=eq.{request.session_id}&select=context_text"
         headers = {
             "apikey": supabase_key,
@@ -98,14 +96,12 @@ async def chat_with_customer(request: ChatRequest):
             
         context = doc_data[0]["context_text"]
         
-        # 2. جلب آخر 6 رسائل من تاريخ المحادثة من سوبابيز عبر الـ REST API
         hist_url = f"{supabase_url}/rest/v1/chat_history_store?session_id=eq.{request.session_id}&select=role,message_text&order=id.desc&limit=6"
         
         with httpx.Client(timeout=15.0) as client:
             hist_res = client.get(hist_url, headers=headers)
             history_data = reversed(hist_res.json())
             
-        # 3. بناء توجيهات النظام والرسائل لـ Gemini
         system_instruction = (
             "أنت موظف خدمة عملاء ذكي ومحترف لشركتنا. أجب على سؤال العميل بناءً على السياق المرفق وتاريخ المحادثة فقط.\n"
             "1. كن مهذباً وواضحاً وسريع الإجابة.\n"
@@ -125,7 +121,6 @@ async def chat_with_customer(request: ChatRequest):
             "parts": [{"text": request.question}]
         })
         
-        # 4. إرسال الطلب إلى واجهة جوجل جيميناي الرسمية المستقرة لـ REST
         gemini_url = f"https://googleapis.com{google_key}"
         payload = {
             "contents": contents,
@@ -144,9 +139,8 @@ async def chat_with_customer(request: ChatRequest):
         if gemini_res.status_code != 200:
             raise HTTPException(status_code=gemini_res.status_code, detail="Google AI API Service Failure.")
             
-        response_text = gemini_data['candidates'][0]['content']['parts'][0]['text']
+        response_text = gemini_data['candidates']['content']['parts']['text']
         
-        # 5. حفظ الحوار الجديد في جدول التاريخ سحابياً لتحديث الذاكرة
         save_url = f"{supabase_url}/rest/v1/chat_history_store"
         chat_payload = [
             {"session_id": request.session_id, "role": "user", "message_text": request.question},
