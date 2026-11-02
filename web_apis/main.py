@@ -128,3 +128,4 @@ async def chat_with_customer(request: ChatRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة الرد الذكي: {str(e)}")
+        # /////
