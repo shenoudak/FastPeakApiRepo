@@ -28,32 +28,32 @@ class ChatRequest(BaseModel):
 def home():
     return {"status": "FastAPI Ultra-Light REST RAG is active and running perfectly!"}
 
-@app.post("/upload-document/")
-async def upload_document(file: UploadFile = File(...)):
-    global extracted_context, is_document_uploaded
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
+# @app.post("/upload-document/")
+# async def upload_document(file: UploadFile = File(...)):
+#     global extracted_context, is_document_uploaded
+#     if not file.filename.endswith('.pdf'):
+#         raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
     
-    try:
-        pdf_reader = pypdf.PdfReader(file.file)
-        text_chunks = []
-        for page in pdf_reader.pages:
-            text = page.extract_text()
-            if text:
-                text_chunks.append(text)
+#     try:
+#         pdf_reader = pypdf.PdfReader(file.file)
+#         text_chunks = []
+#         for page in pdf_reader.pages:
+#             text = page.extract_text()
+#             if text:
+#                 text_chunks.append(text)
                 
-        extracted_context = "\n".join(text_chunks)
+#         extracted_context = "\n".join(text_chunks)
         
-        if not extracted_context.strip():
-            raise ValueError("الملف المرفوع فارغ أو لا يحتوي على نصوص مقروءة.")
+#         if not extracted_context.strip():
+#             raise ValueError("الملف المرفوع فارغ أو لا يحتوي على نصوص مقروءة.")
             
-        is_document_uploaded = True
-        return {"message": f"تمت قراءة ملف الشركة '{file.filename}' وحفظ سياقه بنجاح!"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة المستند: {str(e)}")
+#         is_document_uploaded = True
+#         return {"message": f"تمت قراءة ملف الشركة '{file.filename}' وحفظ سياقه بنجاح!"}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"حدث خطأ أثناء معالجة المستند: {str(e)}")
 
-@app.post("/chat/")
-async def chat_with_customer(request: ChatRequest):
+# @app.post("/chat/")
+# async def chat_with_customer(request: ChatRequest):
     global extracted_context, is_document_uploaded
     if not is_document_uploaded:
         raise HTTPException(status_code=400, detail="برجاء رفع ملف الـ PDF الخاص بالشركة أولاً لتدريب الروبوت.")
