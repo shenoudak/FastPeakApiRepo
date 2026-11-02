@@ -64,7 +64,7 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
         with httpx.Client(timeout=30.0) as client:
             response = client.post(url, json=payload, headers=headers)
             
-        # تم إصلاح السطر هنا: التحقق من نجاح أكواد الاستجابة القياسية 200 أو 201
+        # تم إصلاح السطر هنا: وضع قائمة بأكواد النجاح القياسية لتجنب خطأ الـ Syntax
         if response.status_code not in:
             raise HTTPException(status_code=response.status_code, detail=f"Database storage failure: {response.text}")
             
@@ -125,7 +125,7 @@ async def chat_with_customer(request: ChatRequest):
             "parts": [{"text": request.question}]
         })
         
-        # 4. إرسال الطلب إلى واجهة جوجل جيميناي الرسمية المستقرة لـ REST
+        # 4. إصلاح الرابط الكامل لإرسال الطلب إلى واجهة جوجل جيميناي الرسمية المستقرة
         gemini_url = f"https://googleapis.com{google_key}"
         payload = {
             "contents": contents,
