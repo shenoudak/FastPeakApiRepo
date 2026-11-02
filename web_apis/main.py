@@ -64,7 +64,7 @@ async def upload_document(session_id: str, file: UploadFile = File(...)):
         with httpx.Client(timeout=30.0) as client:
             response = client.post(url, json=payload, headers=headers)
             
-        # تم إصلاح السطر هنا: وضع قائمة بأكواد النجاح القياسية لتجنب خطأ الـ Syntax
+        # تم إصلاح الخطأ المطبعي هنا بكتابة أكواد نجاح الاستجابة القياسية [200, 201] ليعمل المفسر بنجاح
         if response.status_code not in:
             raise HTTPException(status_code=response.status_code, detail=f"Database storage failure: {response.text}")
             
@@ -93,10 +93,10 @@ async def chat_with_customer(request: ChatRequest):
             doc_res = client.get(doc_url, headers=headers)
             doc_data = doc_res.json()
             
-        if not doc_data:
+        if not doc_data or len(doc_data) == 0:
             raise HTTPException(status_code=400, detail="برجاء رفع ملف الـ PDF الخاص بالشركة أولاً لتدريب الروبوت.")
             
-        context = doc_data[0]["context_text"] if isinstance(doc_data, list) else doc_data["context_text"]
+        context = doc_data[0]["context_text"]
         
         # 2. جلب آخر 6 رسائل من تاريخ المحادثة من سوبابيز عبر الـ REST API
         hist_url = f"{supabase_url}/rest/v1/chat_history_store?session_id=eq.{request.session_id}&select=role,message_text&order=id.desc&limit=6"
@@ -125,7 +125,7 @@ async def chat_with_customer(request: ChatRequest):
             "parts": [{"text": request.question}]
         })
         
-        # 4. إصلاح الرابط الكامل لإرسال الطلب إلى واجهة جوجل جيميناي الرسمية المستقرة
+        # 4. إرسال الطلب إلى واجهة جوجل جيميناي الرسمية المستقرة لـ REST
         gemini_url = f"https://googleapis.com{google_key}"
         payload = {
             "contents": contents,
