@@ -24,8 +24,8 @@ class ChatRequest(BaseModel):
 def home():
     return {"status": "FastAPI Permanent REST Cloud RAG is active and running perfectly!"}
 
-@app.post("/upload-document/")
-async def upload_document(session_id: str, file: UploadFile = File(...)):
+# @app.post("/upload-document/")
+# async def upload_document(session_id: str, file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="يجب أن يكون الملف بصيغة PDF فقط.")
     
